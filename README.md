@@ -21,13 +21,13 @@ If you have `take-note` installed via [lazy-take-notes setup](https://github.com
 
 ```bash
 # Replace the existing take-note wrapper to include the youtube plugin
-cat > "$(brew --prefix)/bin/take-note" << 'EOF'
+cat > "$(which take-note)" << 'EOF'
 #!/bin/bash
 exec uvx --from "git+https://github.com/CJHwong/lazy-take-notes.git" \
     --with "ltn-youtube @ git+https://github.com/CJHwong/ltn-youtube.git" \
     lazy-take-notes "$@"
 EOF
-chmod +x "$(brew --prefix)/bin/take-note"
+chmod +x "$(which take-note)"
 ```
 
 Then use directly:
