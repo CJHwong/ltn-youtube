@@ -4,36 +4,19 @@ YouTube transcription plugin for [lazy-take-notes](https://github.com/CJHwong/la
 
 Transcribe YouTube videos using existing subtitles (preferred) or audio download with whisper (fallback). All digest, quick actions, and TUI features from lazy-take-notes work out of the box.
 
+## Install
+
+Requires [lazy-take-notes](https://github.com/CJHwong/lazy-take-notes) installed via setup script.
+
+```bash
+take-note plugin add "ltn-youtube @ git+https://github.com/CJHwong/ltn-youtube.git"
+```
+
 ## Usage
 
 ```bash
-uvx --from "lazy-take-notes @ git+https://github.com/CJHwong/lazy-take-notes.git" \
-    --with "ltn-youtube @ git+https://github.com/CJHwong/ltn-youtube.git" \
-    lazy-take-notes youtube "https://www.youtube.com/watch?v=VIDEO_ID"
-
-# With a custom session label
-uvx --from "lazy-take-notes @ git+https://github.com/CJHwong/lazy-take-notes.git" \
-    --with "ltn-youtube @ git+https://github.com/CJHwong/ltn-youtube.git" \
-    lazy-take-notes youtube "https://youtu.be/VIDEO_ID" --label "my-notes"
-```
-
-If you have `take-note` installed via [lazy-take-notes setup](https://github.com/CJHwong/lazy-take-notes), you can add the plugin permanently by updating the wrapper script:
-
-```bash
-# Replace the existing take-note wrapper to include the youtube plugin
-cat > "$(which take-note)" << 'EOF'
-#!/bin/bash
-exec uvx --from "git+https://github.com/CJHwong/lazy-take-notes.git" \
-    --with "ltn-youtube @ git+https://github.com/CJHwong/ltn-youtube.git" \
-    lazy-take-notes "$@"
-EOF
-chmod +x "$(which take-note)"
-```
-
-Then use directly:
-
-```bash
 take-note youtube "https://www.youtube.com/watch?v=VIDEO_ID"
+take-note youtube "https://youtu.be/VIDEO_ID" --label "my-notes"
 ```
 
 ## How it works
