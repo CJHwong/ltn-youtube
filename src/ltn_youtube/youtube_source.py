@@ -4,15 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
-import urllib.request
+import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
 
 from lazy_take_notes.plugin_api import TranscriptSegment
 
 log = logging.getLogger('ltn.youtube')
-
-_SUBTITLE_FETCH_TIMEOUT = 15
 
 _YOUTUBE_HOSTS = frozenset(
     {
@@ -40,15 +38,17 @@ def is_youtube_url(value: str) -> bool:
 def fetch_subtitles(url: str) -> tuple[list[TranscriptSegment], str] | None:
     """Fetch YouTube subtitles as TranscriptSegments. Returns (segments, title) or None.
 
-    Single-phase approach: extract video info (which includes subtitle track
-    URLs), pick the best track, fetch the json3 data directly, and parse it
-    into segments. No temp files, no second yt-dlp invocation.
+    Two-phase approach:
+    1. extract_info(download=False) to get video metadata and pick the best
+       subtitle track via _pick_subtitle_track.
+    2. Use yt-dlp's native subtitle download to fetch the json3 file to a
+       temp directory, then parse it.
 
     Track selection priority:
     1. Manual subs in the video's own language
-    2. Manual subs in the preferred language list
+    2. Manual subs in any language
     3. Auto subs in the video's own language
-    4. Auto subs in the preferred language list
+    4. Auto subs in any language
     """
     import yt_dlp  # noqa: PLC0415 -- deferred: yt-dlp is heavy
 
@@ -64,26 +64,40 @@ def fetch_subtitles(url: str) -> tuple[list[TranscriptSegment], str] | None:
     auto_subs = info.get('automatic_captions') or {}
     video_lang = info.get('language') or ''
 
-    track = _pick_subtitle_track(manual_subs, auto_subs, video_lang)
-
-    if track is None:
+    picked = _pick_subtitle_track(manual_subs, auto_subs, video_lang)
+    if picked is None:
         return None
 
-    # Find json3 format entry in the track
-    json3_url = next((fmt.get('url') for fmt in track if fmt.get('ext') == 'json3' and fmt.get('url')), None)
-    if json3_url is None:
-        return None
+    lang_code, is_manual = picked
 
-    try:
-        with urllib.request.urlopen(json3_url, timeout=_SUBTITLE_FETCH_TIMEOUT) as resp:  # noqa: S310 -- URL comes from yt-dlp info dict, not user input
-            data = json.load(resp)
-    except Exception:
-        log.warning('Failed to fetch json3 subtitles from %s', json3_url[:80], exc_info=True)
-        return None
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        sub_opts = {
+            **_quiet_opts(),
+            'skip_download': True,
+            'writesubtitles': is_manual,
+            'writeautomaticsubs': not is_manual,
+            'subtitleslangs': [lang_code],
+            'subtitlesformat': 'json3',
+            'outtmpl': str(Path(tmp_dir) / '%(id)s.%(ext)s'),
+        }
 
-    segments = parse_json3_events(data.get('events', []))
-    if not segments:
-        return None
+        try:
+            with yt_dlp.YoutubeDL(sub_opts) as ydl:
+                ydl.download([url])
+        except yt_dlp.utils.DownloadError:
+            log.warning('Failed to download subtitles for %s', url, exc_info=True)
+            return None
+
+        json3_file = next(Path(tmp_dir).glob('*.json3'), None)
+        if json3_file is None:
+            return None
+
+        with open(json3_file) as fh:
+            data = json.load(fh)
+
+        segments = parse_json3_events(data.get('events', []))
+        if not segments:
+            return None
 
     return segments, title
 
@@ -92,8 +106,8 @@ def _pick_subtitle_track(
     manual_subs: dict[str, list],
     auto_subs: dict[str, list],
     video_lang: str,
-) -> list | None:
-    """Pick the best subtitle track.
+) -> tuple[str, bool] | None:
+    """Pick the best subtitle track, returning (language_code, is_manual).
 
     Priority:
     1. Manual subs in the video's own language
@@ -106,19 +120,24 @@ def _pick_subtitle_track(
     because it matches what's actually being spoken.
     """
 
-    def _first_track(subs: dict[str, list]) -> list | None:
-        return next(iter(subs.values()), None) if subs else None
+    def _first_lang(subs: dict[str, list]) -> str | None:
+        return next(iter(subs), None) if subs else None
 
     # Manual subs: video language first, then any
     if video_lang and video_lang in manual_subs:
-        return manual_subs[video_lang]
-    if manual_subs:
-        return _first_track(manual_subs)
+        return (video_lang, True)
+    first_manual = _first_lang(manual_subs)
+    if first_manual is not None:
+        return (first_manual, True)
 
     # Auto subs: video language first, then any
     if video_lang and video_lang in auto_subs:
-        return auto_subs[video_lang]
-    return _first_track(auto_subs)
+        return (video_lang, False)
+    first_auto = _first_lang(auto_subs)
+    if first_auto is not None:
+        return (first_auto, False)
+
+    return None
 
 
 def parse_json3_events(events: list[dict]) -> list[TranscriptSegment]:

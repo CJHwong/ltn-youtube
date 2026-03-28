@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -10,7 +11,7 @@ import pytest
 from ltn_youtube.youtube_source import download_audio, fetch_subtitles, is_youtube_url, parse_json3_events
 
 
-def _make_mock_ydl(extract_return=None, extract_side_effect=None):
+def _make_mock_ydl(extract_return=None, extract_side_effect=None, download_side_effect=None):
     """Build a MagicMock that behaves as a yt_dlp.YoutubeDL context manager."""
     mock_ydl = MagicMock()
     mock_ydl.__enter__.return_value = mock_ydl
@@ -18,6 +19,8 @@ def _make_mock_ydl(extract_return=None, extract_side_effect=None):
         mock_ydl.extract_info.side_effect = extract_side_effect
     elif extract_return is not None:
         mock_ydl.extract_info.return_value = extract_return
+    if download_side_effect is not None:
+        mock_ydl.download.side_effect = download_side_effect
     return mock_ydl
 
 
@@ -105,33 +108,63 @@ class TestParseJson3Events:
         assert parse_json3_events([]) == []
 
 
-_FAKE_JSON3_BODY = b'{"events": [{"tStartMs": 1000, "dDurationMs": 2000, "segs": [{"utf8": "Hello"}]}]}'
+_FAKE_JSON3_DATA = {'events': [{'tStartMs': 1000, 'dDurationMs': 2000, 'segs': [{'utf8': 'Hello'}]}]}
 
 _INFO_WITH_MANUAL_SUBS = {
     'title': 'Test Video',
     'language': 'en',
-    'subtitles': {
-        'en': [{'ext': 'json3', 'url': 'https://example.com/subs.json3'}],
-    },
+    'subtitles': {'en': [{'ext': 'json3'}]},
     'automatic_captions': {},
 }
 
 
+class _YdlFactory:
+    """YoutubeDL class replacement that handles both extract_info and download calls.
+
+    First instantiation: returns a mock with extract_info returning info_return.
+    Second instantiation: returns a mock whose download() writes json3_data to the
+    temp dir (extracted from the outtmpl option), or raises download_error.
+    """
+
+    def __init__(self, info_return, json3_data=None, download_error=None):
+        self.info_return = info_return
+        self.json3_data = json3_data
+        self.download_error = download_error
+        self.all_ydls: list[MagicMock] = []
+
+    def __call__(self, opts=None):
+        mock_ydl = MagicMock()
+        mock_ydl.__enter__.return_value = mock_ydl
+        mock_ydl._init_opts = opts
+
+        if not self.all_ydls:
+            mock_ydl.extract_info.return_value = self.info_return
+        else:
+            if self.download_error is not None:
+                mock_ydl.download.side_effect = self.download_error
+            elif self.json3_data is not None and opts:
+                outtmpl = opts.get('outtmpl', '')
+                tmp_dir = Path(outtmpl).parent
+                json3_data = self.json3_data
+
+                def _write_json3(urls):
+                    json3_path = tmp_dir / 'testvid.en.json3'
+                    json3_path.write_text(json.dumps(json3_data))
+
+                mock_ydl.download.side_effect = _write_json3
+
+        self.all_ydls.append(mock_ydl)
+        return mock_ydl
+
+
 class TestFetchSubtitles:
     def test_happy_path_returns_segments_and_title(self):
-        """Full success path: extract info -> pick track -> fetch json3 -> parse."""
+        """Full success path: extract info -> pick track -> download json3 -> parse."""
         import yt_dlp
 
-        mock_ydl = _make_mock_ydl(extract_return=_INFO_WITH_MANUAL_SUBS)
-        mock_resp = MagicMock()
-        mock_resp.read.return_value = _FAKE_JSON3_BODY
-        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
-        mock_resp.__exit__ = MagicMock(return_value=False)
+        factory = _YdlFactory(_INFO_WITH_MANUAL_SUBS, json3_data=_FAKE_JSON3_DATA)
 
-        with (
-            patch.object(yt_dlp, 'YoutubeDL', return_value=mock_ydl),
-            patch('ltn_youtube.youtube_source.urllib.request.urlopen', return_value=mock_resp),
-        ):
+        with patch.object(yt_dlp, 'YoutubeDL', side_effect=factory):
             result = fetch_subtitles('https://www.youtube.com/watch?v=test')
 
         assert result is not None
@@ -149,27 +182,24 @@ class TestFetchSubtitles:
         info = {
             'title': 'Mixed',
             'language': 'en',
-            'subtitles': {'ja': [{'ext': 'json3', 'url': 'https://example.com/manual.json3'}]},
-            'automatic_captions': {'en': [{'ext': 'json3', 'url': 'https://example.com/auto.json3'}]},
+            'subtitles': {'ja': [{'ext': 'json3'}]},
+            'automatic_captions': {'en': [{'ext': 'json3'}]},
         }
-        mock_ydl = _make_mock_ydl(extract_return=info)
-        mock_resp = MagicMock()
-        mock_resp.read.return_value = _FAKE_JSON3_BODY
-        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
-        mock_resp.__exit__ = MagicMock(return_value=False)
+        factory = _YdlFactory(info, json3_data=_FAKE_JSON3_DATA)
 
-        with (
-            patch.object(yt_dlp, 'YoutubeDL', return_value=mock_ydl),
-            patch('ltn_youtube.youtube_source.urllib.request.urlopen', return_value=mock_resp) as mock_urlopen,
-        ):
+        with patch.object(yt_dlp, 'YoutubeDL', side_effect=factory):
             result = fetch_subtitles('https://www.youtube.com/watch?v=test')
 
         assert result is not None
-        fetched_url = mock_urlopen.call_args[0][0]
-        assert 'manual' in fetched_url
+        # The second YoutubeDL call should request manual subs in 'ja'
+        sub_ydl = factory.all_ydls[1]
+        sub_opts = sub_ydl._init_opts
+        assert sub_opts['writesubtitles'] is True
+        assert sub_opts['writeautomaticsubs'] is False
+        assert sub_opts['subtitleslangs'] == ['ja']
 
     def test_download_error_returns_none(self):
-        """yt-dlp DownloadError (e.g. 429) should return None, not crash."""
+        """yt-dlp DownloadError on extract_info (e.g. 429) should return None, not crash."""
         import yt_dlp
 
         mock_ydl = _make_mock_ydl(extract_side_effect=yt_dlp.utils.DownloadError('HTTP Error 429'))
@@ -191,16 +221,28 @@ class TestFetchSubtitles:
 
         assert result is None
 
-    def test_json3_fetch_failure_returns_none(self):
-        """Network error fetching json3 URL returns None instead of propagating."""
+    def test_json3_file_missing_returns_none(self):
+        """yt-dlp downloads but produces no json3 file -> returns None."""
         import yt_dlp
 
-        mock_ydl = _make_mock_ydl(extract_return=_INFO_WITH_MANUAL_SUBS)
+        # json3_data=None means download() is a no-op, no file written
+        factory = _YdlFactory(_INFO_WITH_MANUAL_SUBS, json3_data=None)
 
-        with (
-            patch.object(yt_dlp, 'YoutubeDL', return_value=mock_ydl),
-            patch('ltn_youtube.youtube_source.urllib.request.urlopen', side_effect=OSError('connection reset')),
-        ):
+        with patch.object(yt_dlp, 'YoutubeDL', side_effect=factory):
+            result = fetch_subtitles('https://www.youtube.com/watch?v=test')
+
+        assert result is None
+
+    def test_subtitle_download_failure_returns_none(self):
+        """yt-dlp subtitle download raises (e.g. 429 rate limit) -> returns None."""
+        import yt_dlp
+
+        factory = _YdlFactory(
+            _INFO_WITH_MANUAL_SUBS,
+            download_error=yt_dlp.utils.DownloadError('HTTP Error 429: Too Many Requests'),
+        )
+
+        with patch.object(yt_dlp, 'YoutubeDL', side_effect=factory):
             result = fetch_subtitles('https://www.youtube.com/watch?v=test')
 
         assert result is None
