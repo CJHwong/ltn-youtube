@@ -39,7 +39,14 @@ def youtube_command(ctx, url, label):
         segments, video_title = subtitle_result
         click.echo(f'Found subtitles ({len(segments)} segments), skipping audio download.', err=True)
         resolved_label = label if label is not None else (video_title or None)
-        run_transcribe(ctx, subtitle_segments=segments, audio_path=None, label=resolved_label)
+        run_transcribe(
+            ctx,
+            subtitle_segments=segments,
+            audio_path=None,
+            label=resolved_label,
+            source_url=url,
+            source_title=video_title,
+        )
         return
 
     # Audio fallback
@@ -53,4 +60,11 @@ def youtube_command(ctx, url, label):
 
         click.echo(f'Audio downloaded: {audio_path.name}', err=True)
         resolved_label = label if label is not None else (video_title or None)
-        run_transcribe(ctx, subtitle_segments=None, audio_path=audio_path, label=resolved_label)
+        run_transcribe(
+            ctx,
+            subtitle_segments=None,
+            audio_path=audio_path,
+            label=resolved_label,
+            source_url=url,
+            source_title=video_title,
+        )
