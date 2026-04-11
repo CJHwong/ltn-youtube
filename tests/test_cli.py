@@ -90,8 +90,10 @@ class TestYoutubeCommand:
             patch(f'{_CLI}.download_audio', return_value=(audio_file, 'Fallback Title')),
             patch(f'{_CLI}.run_transcribe') as mock_run,
         ):
-            _run([url])
+            result = _run([url])
 
+        assert result.exit_code == 0
+        mock_run.assert_called_once()
         call_kwargs = mock_run.call_args[1]
         assert call_kwargs['source_url'] == url
         assert call_kwargs['source_title'] == 'Fallback Title'
