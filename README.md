@@ -26,6 +26,9 @@ take-note youtube "https://youtu.be/VIDEO_ID" --label "my-notes"
 3. If no subtitles — downloads audio via yt-dlp and transcribes with whisper
 4. Opens the standard lazy-take-notes TUI with template picker, digest, and quick actions
 
+After transcription, the notes include the video URL and title. Bracketed timestamps link to the corresponding YouTube position.
+The plugin warns if generated notes contain no timestamps.
+
 ## Development
 
 ```bash

@@ -37,7 +37,7 @@ class TestYoutubeCommand:
         """When subtitles are found, run_transcribe receives subtitle_segments."""
         with (
             patch(f'{_CLI}.fetch_subtitles', return_value=(_STUB_SEGMENTS, 'Test Video')),
-            patch(f'{_CLI}.run_transcribe') as mock_run,
+            patch(f'{_CLI}.run_transcribe', return_value=None) as mock_run,
         ):
             result = _run(['https://www.youtube.com/watch?v=test123'])
 
@@ -57,7 +57,7 @@ class TestYoutubeCommand:
         with (
             patch(f'{_CLI}.fetch_subtitles', return_value=None),
             patch(f'{_CLI}.download_audio', return_value=(audio_file, 'Test Video')),
-            patch(f'{_CLI}.run_transcribe') as mock_run,
+            patch(f'{_CLI}.run_transcribe', return_value=None) as mock_run,
         ):
             result = _run(['https://www.youtube.com/watch?v=test123'])
 
@@ -89,7 +89,7 @@ class TestYoutubeCommand:
         """When no --label, video title is used as session label."""
         with (
             patch(f'{_CLI}.fetch_subtitles', return_value=(_STUB_SEGMENTS, 'My Video Title')),
-            patch(f'{_CLI}.run_transcribe') as mock_run,
+            patch(f'{_CLI}.run_transcribe', return_value=None) as mock_run,
         ):
             result = _run(['https://www.youtube.com/watch?v=test123'])
 
@@ -100,7 +100,7 @@ class TestYoutubeCommand:
         """Explicit --label takes precedence over video title."""
         with (
             patch(f'{_CLI}.fetch_subtitles', return_value=(_STUB_SEGMENTS, 'Video Title')),
-            patch(f'{_CLI}.run_transcribe') as mock_run,
+            patch(f'{_CLI}.run_transcribe', return_value=None) as mock_run,
         ):
             result = _run(['https://www.youtube.com/watch?v=test123', '--label', 'my-custom-label'])
 
