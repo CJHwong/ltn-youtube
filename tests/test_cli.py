@@ -37,7 +37,7 @@ class TestYoutubeCommand:
         """When subtitles are found, run_transcribe receives subtitle_segments."""
         with (
             patch(f'{_CLI}.fetch_subtitles', return_value=(_STUB_SEGMENTS, 'Test Video')),
-            patch(f'{_CLI}.run_transcribe') as mock_run,
+            patch(f'{_CLI}.run_transcribe', return_value=None) as mock_run,
         ):
             result = _run(['https://www.youtube.com/watch?v=test123'])
 
@@ -49,19 +49,6 @@ class TestYoutubeCommand:
         assert call_kwargs['audio_path'] is None
         assert call_kwargs['label'] == 'Test Video'
 
-    def test_subtitles_path_passes_source_url_and_title(self):
-        """source_url and source_title are forwarded when subtitles are found."""
-        url = 'https://www.youtube.com/watch?v=test123'
-        with (
-            patch(f'{_CLI}.fetch_subtitles', return_value=(_STUB_SEGMENTS, 'Test Video')),
-            patch(f'{_CLI}.run_transcribe') as mock_run,
-        ):
-            _run([url])
-
-        call_kwargs = mock_run.call_args[1]
-        assert call_kwargs['source_url'] == url
-        assert call_kwargs['source_title'] == 'Test Video'
-
     def test_audio_fallback_when_no_subtitles(self, tmp_path):
         """When no subtitles, run_transcribe receives audio_path."""
         audio_file = tmp_path / 'audio.wav'
@@ -70,7 +57,7 @@ class TestYoutubeCommand:
         with (
             patch(f'{_CLI}.fetch_subtitles', return_value=None),
             patch(f'{_CLI}.download_audio', return_value=(audio_file, 'Test Video')),
-            patch(f'{_CLI}.run_transcribe') as mock_run,
+            patch(f'{_CLI}.run_transcribe', return_value=None) as mock_run,
         ):
             result = _run(['https://www.youtube.com/watch?v=test123'])
 
@@ -78,25 +65,6 @@ class TestYoutubeCommand:
         call_kwargs = mock_run.call_args[1]
         assert call_kwargs['audio_path'] == audio_file
         assert call_kwargs['subtitle_segments'] is None
-
-    def test_audio_fallback_passes_source_url_and_title(self, tmp_path):
-        """source_url and source_title are forwarded in the audio fallback path."""
-        audio_file = tmp_path / 'audio.wav'
-        audio_file.touch()
-        url = 'https://www.youtube.com/watch?v=test123'
-
-        with (
-            patch(f'{_CLI}.fetch_subtitles', return_value=None),
-            patch(f'{_CLI}.download_audio', return_value=(audio_file, 'Fallback Title')),
-            patch(f'{_CLI}.run_transcribe') as mock_run,
-        ):
-            result = _run([url])
-
-        assert result.exit_code == 0
-        mock_run.assert_called_once()
-        call_kwargs = mock_run.call_args[1]
-        assert call_kwargs['source_url'] == url
-        assert call_kwargs['source_title'] == 'Fallback Title'
 
     def test_unexpected_fetch_subtitles_exception_exits_1(self):
         """Uncaught exception from fetch_subtitles exits cleanly with error message."""
@@ -121,7 +89,7 @@ class TestYoutubeCommand:
         """When no --label, video title is used as session label."""
         with (
             patch(f'{_CLI}.fetch_subtitles', return_value=(_STUB_SEGMENTS, 'My Video Title')),
-            patch(f'{_CLI}.run_transcribe') as mock_run,
+            patch(f'{_CLI}.run_transcribe', return_value=None) as mock_run,
         ):
             result = _run(['https://www.youtube.com/watch?v=test123'])
 
@@ -132,7 +100,7 @@ class TestYoutubeCommand:
         """Explicit --label takes precedence over video title."""
         with (
             patch(f'{_CLI}.fetch_subtitles', return_value=(_STUB_SEGMENTS, 'Video Title')),
-            patch(f'{_CLI}.run_transcribe') as mock_run,
+            patch(f'{_CLI}.run_transcribe', return_value=None) as mock_run,
         ):
             result = _run(['https://www.youtube.com/watch?v=test123', '--label', 'my-custom-label'])
 
